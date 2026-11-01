@@ -38,24 +38,38 @@ export type Lap = {
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+// Bei diesen Sportarten speichert FIT die Kadenz in Doppelschritten pro Minute.
+const STEP_SPORTS = new Set(["running", "walking", "hiking"]);
+
+/**
+ * Kadenz wie in Garmin Connect: bei Schrittsportarten in Schritten pro Minute
+ * (Doppelschritte × 2, inklusive Nachkommaanteil), sonst unverändert (z. B. U/min beim Rad).
+ */
+function lapCadence(l: { avgRunningCadence?: number; avgCadence?: number; avgFractionalCadence?: number }, sport: unknown) {
+	const base = num(l.avgRunningCadence) ?? num(l.avgCadence);
+	if (base === null) return null;
+	if (typeof sport !== "string" || !STEP_SPORTS.has(sport)) return base;
+	return Math.round((base + (num(l.avgFractionalCadence) ?? 0)) * 2);
+}
+
 /** Liest die Runden (lap-Nachrichten) aus einer FIT-Datei. */
 export function parseLaps(fit: Uint8Array): Lap[] {
 	const { messages, errors } = new Decoder(Stream.fromByteArray(fit)).read();
 	if (errors.length && !messages.lapMesgs?.length) throw errors[0];
-	return (messages.lapMesgs ?? []).map((lap, i) => {
-		// Neuere Geräte schreiben Tempo nur in die "enhanced"-Felder.
-		const l = lap as typeof lap & { enhancedAvgSpeed?: number; enhancedMaxSpeed?: number };
+	const sessionSport = messages.sessionMesgs?.[0]?.sport;
+	return (messages.lapMesgs ?? []).map((l, i) => {
 		return {
 			lap_index: typeof l.messageIndex === "number" ? l.messageIndex : i,
 			start_time: l.startTime instanceof Date ? l.startTime.toISOString() : null,
 			elapsed_s: num(l.totalElapsedTime),
 			timer_s: num(l.totalTimerTime),
 			distance_m: num(l.totalDistance),
+			// Neuere Geräte schreiben Tempo nur in die "enhanced"-Felder.
 			avg_speed_mps: num(l.enhancedAvgSpeed) ?? num(l.avgSpeed),
 			max_speed_mps: num(l.enhancedMaxSpeed) ?? num(l.maxSpeed),
 			avg_hr: num(l.avgHeartRate),
 			max_hr: num(l.maxHeartRate),
-			avg_cadence: num(l.avgRunningCadence) ?? num(l.avgCadence),
+			avg_cadence: lapCadence(l, l.sport ?? sessionSport),
 			avg_power: num(l.avgPower),
 			ascent_m: num(l.totalAscent),
 			descent_m: num(l.totalDescent),

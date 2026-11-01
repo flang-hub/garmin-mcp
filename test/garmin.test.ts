@@ -68,7 +68,7 @@ describe("GarminClient", () => {
 // Die SDK-Typen erwarten Zahlen für Enums; der Encoder akzeptiert auch die Namen.
 const mesg = (fields: Record<string, unknown>) => fields as Mesg;
 
-function buildFit(): Uint8Array {
+function buildFit(sport = "running"): Uint8Array {
 	const enc = new Encoder();
 	const start = new Date("2026-10-30T07:00:00Z");
 	enc.onMesg(Profile.MesgNum.FILE_ID, mesg({ type: "activity", manufacturer: "garmin", timeCreated: start }));
@@ -85,7 +85,9 @@ function buildFit(): Uint8Array {
 			enhancedAvgSpeed: 1000 / 295,
 			avgHeartRate: 150 + i,
 			maxHeartRate: 165,
+			sport,
 			avgCadence: 85,
+			avgFractionalCadence: 0.5,
 			totalAscent: 12,
 			lapTrigger: "distance",
 			}),
@@ -109,11 +111,16 @@ describe("FIT", () => {
 			timer_s: 295,
 			avg_hr: 151,
 			max_hr: 165,
-			avg_cadence: 85,
+			// 85,5 Doppelschritte → 171 Schritte pro Minute
+			avg_cadence: 171,
 			ascent_m: 12,
 			lap_trigger: "distance",
 		});
 		expect(laps[1].avg_speed_mps).toBeCloseTo(3.39, 2);
+	});
+
+	it("lässt die Kadenz bei Nicht-Schrittsportarten unverändert", () => {
+		expect(parseLaps(buildFit("cycling"))[0].avg_cadence).toBe(85);
 	});
 
 	it("akzeptiert eine FIT-Datei ohne ZIP", () => {
