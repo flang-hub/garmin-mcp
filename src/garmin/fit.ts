@@ -1,4 +1,4 @@
-import { Decoder, Stream } from "@garmin/fitsdk";
+import { Decoder, type FitMessages, Stream } from "@garmin/fitsdk";
 import { unzipSync } from "fflate";
 
 /**
@@ -52,10 +52,15 @@ function lapCadence(l: { avgRunningCadence?: number; avgCadence?: number; avgFra
 	return Math.round((base + (num(l.avgFractionalCadence) ?? 0)) * 2);
 }
 
-/** Liest die Runden (lap-Nachrichten) aus einer FIT-Datei. */
-export function parseLaps(fit: Uint8Array): Lap[] {
+/** Dekodiert eine FIT-Datei einmal; Runden und Kennzahlen lesen daraus. */
+export function decodeFit(fit: Uint8Array): FitMessages {
 	const { messages, errors } = new Decoder(Stream.fromByteArray(fit)).read();
-	if (errors.length && !messages.lapMesgs?.length) throw errors[0];
+	if (errors.length && !messages.lapMesgs?.length && !messages.recordMesgs?.length) throw errors[0];
+	return messages;
+}
+
+/** Liest die Runden (lap-Nachrichten). */
+export function parseLaps(messages: FitMessages): Lap[] {
 	const sessionSport = messages.sessionMesgs?.[0]?.sport;
 	return (messages.lapMesgs ?? []).map((l, i) => {
 		return {

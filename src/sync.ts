@@ -1,7 +1,7 @@
 import { addDays, localDate, maxDate } from "./dates";
-import { ensureUser, markFitError, saveLaps, upsertActivities, upsertDailyHealth, type User } from "./db";
-import { GarminApiError, GarminClient, type TokenCache } from "./garmin/client";
-import { extractFit, parseLaps } from "./garmin/fit";
+import { ensureUser, upsertActivities, upsertDailyHealth, type User } from "./db";
+import { pendingFileWork, processActivityFile } from "./files";
+import { GarminClient, type TokenCache } from "./garmin/client";
 import { mergeDailyHealth, toActivityRow } from "./garmin/mapping";
 
 const PAGE_SIZE = 50;
@@ -29,19 +29,21 @@ function garminKeyFor(env: Env, user: User): string | null {
 	return user.github_login === env.GARMIN_OWNER_LOGIN ? env.GARMIN_API_KEY || null : null;
 }
 
-export async function runScheduledSync(env: Env): Promise<void> {
+/** Alle Nutzer mit Garmin-Zugang samt fertigem Client. */
+export async function garminUsers(env: Env): Promise<{ user: User; client: GarminClient }[]> {
 	const owner = await ensureUser(env.DB, env.GARMIN_OWNER_LOGIN);
-	const users = [owner];
-	for (const user of users) {
+	const out = [];
+	for (const user of [owner]) {
 		const apiKey = garminKeyFor(env, user);
 		if (!apiKey) continue;
-		const client = new GarminClient(
-			apiKey,
-			kvTokenCache(env.OAUTH_KV, user.id),
-			undefined,
-			undefined,
-			env.GARMIN_BASE_URL || undefined,
-		);
+		const cache = kvTokenCache(env.OAUTH_KV, user.id);
+		out.push({ user, client: new GarminClient(apiKey, cache, undefined, undefined, env.GARMIN_BASE_URL || undefined) });
+	}
+	return out;
+}
+
+export async function runScheduledSync(env: Env): Promise<void> {
+	for (const { user, client } of await garminUsers(env)) {
 		try {
 			const result = await syncUser(env, user, client);
 			await env.DB.prepare("UPDATE users SET last_sync_at = ?, last_sync_error = NULL WHERE id = ?")
@@ -62,7 +64,7 @@ export async function syncUser(env: Env, user: User, client: GarminClient) {
 
 	const activities = await syncActivities(env.DB, user.id, client, backfillStart, today);
 	const days = await syncDailyHealth(env.DB, user, client, backfillStart, today);
-	const fits = await syncFitFiles(env, user.id, client, Number(env.FIT_PER_RUN || 5));
+	const fits = await syncFitFiles(env, user.id, client, Number(env.FIT_PER_RUN || 1));
 	return { activities, days, fits };
 }
 
@@ -116,36 +118,9 @@ async function syncDailyHealth(db: D1Database, user: User, client: GarminClient,
 }
 
 async function syncFitFiles(env: Env, userId: number, client: GarminClient, limit: number) {
-	const { results } = await env.DB.prepare(
-		`SELECT activity_id FROM activities
-		 WHERE user_id = ? AND fit_r2_key IS NULL AND fit_error IS NULL
-		 ORDER BY start_time_gmt DESC LIMIT ?`,
-	)
-		.bind(userId, limit)
-		.all<{ activity_id: number }>();
-
 	let done = 0;
-	for (const { activity_id } of results) {
-		let fit: Uint8Array;
-		try {
-			fit = extractFit(await client.downloadActivity(activity_id));
-		} catch (err) {
-			// Vorübergehende Fehler (Rate-Limit, Serverfehler) beim nächsten Lauf erneut versuchen.
-			if (err instanceof GarminApiError && (err.status === 429 || err.status >= 500)) throw err;
-			await markFitError(env.DB, userId, activity_id, err instanceof Error ? err.message : String(err));
-			continue;
-		}
-		const key = `fit/${userId}/${activity_id}.fit`;
-		await env.FIT_BUCKET.put(key, fit, { httpMetadata: { contentType: "application/vnd.ant.fit" } });
-		let laps;
-		try {
-			laps = parseLaps(fit);
-		} catch (err) {
-			await markFitError(env.DB, userId, activity_id, `FIT nicht lesbar: ${err instanceof Error ? err.message : err}`);
-			continue;
-		}
-		await saveLaps(env.DB, userId, activity_id, laps, key);
-		done++;
+	for (const work of await pendingFileWork(env.DB, userId, limit)) {
+		if ((await processActivityFile(env, userId, work, client)) === "done") done++;
 	}
 	return done;
 }

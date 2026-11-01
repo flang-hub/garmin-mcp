@@ -1,3 +1,4 @@
+import type { RunMetrics, Split } from "./garmin/analysis";
 import type { Lap } from "./garmin/fit";
 import { type ActivityRow, DAILY_HEALTH_COLUMNS, type DailyHealthRow } from "./garmin/mapping";
 
@@ -93,20 +94,82 @@ const LAP_COLUMNS = [
 	"lap_trigger",
 ] as const satisfies readonly (keyof Lap)[];
 
-/** Speichert Runden und vermerkt die FIT-Datei an der Aktivität, alles in einer Transaktion. */
-export function saveLaps(db: D1Database, userId: number, activityId: number, laps: Lap[], fitKey: string) {
-	const cols = ["user_id", "activity_id", ...LAP_COLUMNS];
-	const insert = db.prepare(`INSERT INTO laps (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`);
-	return db.batch([
-		db.prepare("DELETE FROM laps WHERE user_id = ? AND activity_id = ?").bind(userId, activityId),
-		...laps.map((l) => insert.bind(userId, activityId, ...LAP_COLUMNS.map((c) => l[c]))),
+const SPLIT_COLUMNS = ["km", "distance_m", "time_s", "avg_hr", "ascent_m", "descent_m"] as const satisfies readonly (keyof Split)[];
+
+/**
+ * Speichert alles, was aus einer FIT-Datei gelesen wurde, in einer Transaktion:
+ * Runden, bei Läufen Kennzahlen, Splits und HF-Stufen, und vermerkt die Datei an der Aktivität.
+ */
+export function saveFitResults(
+	db: D1Database,
+	userId: number,
+	activityId: number,
+	fitKey: string,
+	laps: Lap[],
+	metrics: RunMetrics | null,
+) {
+	const ids = [userId, activityId] as const;
+	const lapCols = ["user_id", "activity_id", ...LAP_COLUMNS];
+	const insertLap = db.prepare(`INSERT INTO laps (${lapCols.join(", ")}) VALUES (${lapCols.map(() => "?").join(", ")})`);
+	const statements = [
+		db.prepare("DELETE FROM laps WHERE user_id = ? AND activity_id = ?").bind(...ids),
+		...laps.map((l) => insertLap.bind(...ids, ...LAP_COLUMNS.map((c) => l[c]))),
 		db
 			.prepare(
-				`UPDATE activities SET fit_r2_key = ?, fit_error = NULL, lap_count = COALESCE(lap_count, ?), updated_at = datetime('now')
+				`UPDATE activities SET fit_r2_key = ?, fit_error = NULL, fit_attempts = 0,
+				 lap_count = COALESCE(lap_count, ?), updated_at = datetime('now')
 				 WHERE user_id = ? AND activity_id = ?`,
 			)
-			.bind(fitKey, laps.length, userId, activityId),
-	]);
+			.bind(fitKey, laps.length, ...ids),
+	];
+	if (metrics) {
+		const json = (v: unknown) => (v === null ? null : JSON.stringify(v));
+		const splitCols = ["user_id", "activity_id", ...SPLIT_COLUMNS];
+		const insertSplit = db.prepare(
+			`INSERT INTO activity_splits (${splitCols.join(", ")}) VALUES (${splitCols.map(() => "?").join(", ")})`,
+		);
+		const insertBin = db.prepare(
+			"INSERT INTO activity_hr_bins (user_id, activity_id, bpm_low, seconds, meters) VALUES (?, ?, ?, ?, ?)",
+		);
+		statements.push(
+			db.prepare("DELETE FROM activity_splits WHERE user_id = ? AND activity_id = ?").bind(...ids),
+			db.prepare("DELETE FROM activity_hr_bins WHERE user_id = ? AND activity_id = ?").bind(...ids),
+			...metrics.splits.map((s) => insertSplit.bind(...ids, ...SPLIT_COLUMNS.map((c) => s[c]))),
+			...metrics.hr_bins.map((b) => insertBin.bind(...ids, b.bpm_low, b.seconds, b.meters)),
+			db
+				.prepare(
+					`INSERT OR REPLACE INTO activity_metrics
+					 (user_id, activity_id, metrics_version, moving_s, distance_m, zone_bounds, zone_calc, zone_s,
+					  zone_moving_s, zone_m, hr_drift_pct, pace_cv_pct, error, computed_at)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))`,
+				)
+				.bind(
+					...ids,
+					metrics.metrics_version,
+					metrics.moving_s,
+					metrics.distance_m,
+					json(metrics.zone_bounds),
+					metrics.zone_calc,
+					json(metrics.zone_s),
+					json(metrics.zone_moving_s),
+					json(metrics.zone_m),
+					metrics.hr_drift_pct,
+					metrics.pace_cv_pct,
+				),
+		);
+	}
+	return db.batch(statements);
+}
+
+/** Zählt einen Verarbeitungsversuch hoch, bevor die CPU-intensive Arbeit beginnt. */
+export async function startFitAttempt(db: D1Database, userId: number, activityId: number): Promise<number> {
+	const row = await db
+		.prepare(
+			"UPDATE activities SET fit_attempts = fit_attempts + 1 WHERE user_id = ? AND activity_id = ? RETURNING fit_attempts",
+		)
+		.bind(userId, activityId)
+		.first<{ fit_attempts: number }>();
+	return row?.fit_attempts ?? 0;
 }
 
 export function markFitError(db: D1Database, userId: number, activityId: number, error: string) {

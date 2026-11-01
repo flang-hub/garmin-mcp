@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { GitHubHandler } from "./auth/github-handler";
 import type { Props } from "./auth/utils";
+import { runBackfill } from "./backfill";
 import { runScheduledSync } from "./sync";
 import { registerGarminTools } from "./tools";
 
@@ -33,10 +34,12 @@ const oauthProvider = new OAuthProvider<Env>({
 	resourceMetadata: { resource: env.MCP_RESOURCE },
 });
 
+const BACKFILL_CRON = "5-59/10 * * * *";
+
 export default {
 	fetch: (request, bindings, ctx) => oauthProvider.fetch(request, bindings, ctx),
-	// Cron-Trigger (alle 30 Minuten, siehe wrangler.jsonc): Garmin-Daten abgleichen.
-	scheduled(_controller, bindings, ctx) {
-		ctx.waitUntil(runScheduledSync(bindings));
+	// Cron-Trigger (siehe wrangler.jsonc): alle 30 Minuten der Abgleich, dazwischen der Historien-Backfill.
+	scheduled(controller, bindings, ctx) {
+		ctx.waitUntil(controller.cron === BACKFILL_CRON ? runBackfill(bindings) : runScheduledSync(bindings));
 	},
 } satisfies ExportedHandler<Env>;

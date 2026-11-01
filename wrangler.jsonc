@@ -25,8 +25,11 @@
 		"TIMEZONE": "Europe/Berlin",
 		// Wie viele Tage beim ersten Abgleich nachgeladen werden.
 		"BACKFILL_DAYS": "30",
-		// Höchstzahl FIT-Dateien pro Cron-Lauf (schont Worker-Limits und Garmin).
-		"FIT_PER_RUN": "5"
+		// Höchstzahl FIT-Dateien pro Cron-Lauf. Workers Free erlaubt nur 10 ms CPU pro Aufruf,
+		// eine FIT-Datei zu dekodieren braucht mehr; daher nur eine pro Lauf.
+		"FIT_PER_RUN": "1",
+		// So viele Monate lädt der Historien-Backfill (nur Läufe und Tageswerte).
+		"BACKFILL_MONTHS": "24"
 	},
 	"kv_namespaces": [
 		{
@@ -49,7 +52,8 @@
 		}
 	],
 	"triggers": {
-		"crons": ["*/30 * * * *"]
+		// Abgleich alle 30 Minuten; Backfill um :05, :15, :25 … (muss zu BACKFILL_CRON in src/index.ts passen).
+		"crons": ["*/30 * * * *", "5-59/10 * * * *"]
 	},
 	"observability": {
 		"enabled": true

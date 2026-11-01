@@ -50,7 +50,7 @@ export function activitySummary(a: Row) {
 	});
 }
 
-export function activityDetail(a: Row, laps: Row[]) {
+export function activityDetail(a: Row, laps: Row[], metrics: Row | null = null, splits: Row[] = []) {
 	let zones: (number | null)[] = [];
 	try {
 		zones = typeof a.hr_zones_s === "string" ? JSON.parse(a.hr_zones_s) : [];
@@ -70,7 +70,8 @@ export function activityDetail(a: Row, laps: Row[]) {
 		vo2max: round(n(a.vo2max)),
 		hr_zone_minutes: zones.length ? zones.map((s) => round(n(s) === null ? 0 : n(s)! / 60, 1)) : null,
 		laps_status: a.fit_r2_key ? null : a.fit_error ? `Runden nicht verfügbar: ${a.fit_error}` : "Runden werden noch geladen",
-		laps: laps.length
+		// Runden weglassen, wenn sie nur die automatischen Kilometer-Runden sind (= Splits).
+		laps: laps.length && !(splits.length && autoKmLaps(laps))
 			? laps.map((l) =>
 					compact({
 						lap: n(l.lap_index) === null ? null : n(l.lap_index)! + 1,
@@ -82,6 +83,58 @@ export function activityDetail(a: Row, laps: Row[]) {
 						cadence: round(n(l.avg_cadence)),
 						power_w: round(n(l.avg_power)),
 						ascent_m: round(n(l.ascent_m)),
+					}),
+				)
+			: null,
+		...(metrics ? runMetrics(a, metrics, splits) : {}),
+	});
+}
+
+/** Runden, die von der Uhr nach je 1 km gesetzt wurden; die letzte endet mit dem Lauf. */
+function autoKmLaps(laps: Row[]): boolean {
+	return laps.every(
+		(l, i) => i === laps.length - 1 || (l.lap_trigger === "distance" && Math.abs((n(l.distance_m) ?? 0) - 1000) < 5),
+	);
+}
+
+function parseJson<T>(v: unknown): T | null {
+	try {
+		return typeof v === "string" ? (JSON.parse(v) as T) : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Kennzahlen aus activity_metrics und activity_splits (nur bei Läufen). */
+function runMetrics(a: Row, m: Row, splits: Row[]) {
+	const bounds = parseJson<number[]>(m.zone_bounds);
+	const zs = parseJson<number[]>(m.zone_moving_s);
+	const zm = parseJson<number[]>(m.zone_m);
+	const zonePace =
+		bounds && zs && zm
+			? [1, 2, 3, 4, 5]
+					.filter((z) => (zs[z] ?? 0) >= 60)
+					.map((z) => ({
+						zone: z,
+						hr: `${bounds[z - 1]}–${bounds[z] - 1}`,
+						minutes: round(zs[z] / 60, 1),
+						...(zm[z] > 0 ? { pace_min_per_km: formatDuration((zs[z] / zm[z]) * 1000) } : {}),
+					}))
+			: null;
+	return compact({
+		hr_drift_pct: n(m.hr_drift_pct),
+		pace_variation_pct: n(m.pace_cv_pct),
+		zone_pace: zonePace,
+		km_splits: splits.length
+			? splits.map((s) =>
+					compact({
+						km: s.km,
+						distance_km: n(s.distance_m) === 1000 ? null : round((n(s.distance_m) ?? 0) / 1000, 2),
+						time: formatDuration(n(s.time_s)),
+						...speedFields(a.type_key, n(s.time_s) ? (n(s.distance_m) ?? 0) / n(s.time_s)! : null),
+						avg_hr: s.avg_hr,
+						ascent_m: s.ascent_m || null,
+						descent_m: s.descent_m || null,
 					}),
 				)
 			: null,

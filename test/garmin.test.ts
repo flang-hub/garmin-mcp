@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { addDays, localDate } from "../src/dates";
 import { activityDetail, activitySummary, dailyHealth, formatDuration, speedFields } from "../src/format";
 import { type CachedToken, GarminClient, jwtExpiration } from "../src/garmin/client";
-import { extractFit, parseLaps } from "../src/garmin/fit";
+import { decodeFit, extractFit, parseLaps } from "../src/garmin/fit";
 import { mergeDailyHealth, toActivityRow } from "../src/garmin/mapping";
 
 const fakeJwt = (exp: number) => `x.${btoa(JSON.stringify({ exp })).replace(/=+$/, "")}.y`;
@@ -102,7 +102,7 @@ describe("FIT", () => {
 		const zip = zipSync({ "123_ACTIVITY.fit": fit });
 		const extracted = extractFit(zip);
 		expect(extracted).toEqual(fit);
-		const laps = parseLaps(extracted);
+		const laps = parseLaps(decodeFit(extracted));
 		expect(laps).toHaveLength(2);
 		expect(laps[1]).toMatchObject({
 			lap_index: 1,
@@ -120,7 +120,7 @@ describe("FIT", () => {
 	});
 
 	it("lässt die Kadenz bei Nicht-Schrittsportarten unverändert", () => {
-		expect(parseLaps(buildFit("cycling"))[0].avg_cadence).toBe(85);
+		expect(parseLaps(decodeFit(buildFit("cycling")))[0].avg_cadence).toBe(85);
 	});
 
 	it("akzeptiert eine FIT-Datei ohne ZIP", () => {
