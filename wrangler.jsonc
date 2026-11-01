@@ -1,0 +1,60 @@
+/**
+ * Wrangler-Konfiguration: https://developers.cloudflare.com/workers/wrangler/configuration/
+ *
+ * Secrets NIE hier eintragen, sondern mit `npx wrangler secret put <NAME>` setzen:
+ *   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, COOKIE_ENCRYPTION_KEY, GARMIN_API_KEY
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "garmin-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-10",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		// Die URL, mit der sich MCP-Clients verbinden. Nach dem ersten Deploy auf
+		// https://garmin-mcp.<dein-subdomain>.workers.dev/mcp setzen.
+		"MCP_RESOURCE": "http://localhost:8788/mcp",
+		// GitHub-Konten (kommagetrennt), die sich anmelden dürfen.
+		"ALLOWED_GITHUB_LOGINS": "flang-hub",
+		// GitHub-Konto, dem der Garmin-Schlüssel aus dem Secret GARMIN_API_KEY gehört.
+		"GARMIN_OWNER_LOGIN": "flang-hub",
+		// Zeitzone für "heute" (Garmin rechnet Tageswerte in lokaler Zeit).
+		"TIMEZONE": "Europe/Berlin",
+		// Wie viele Tage beim ersten Abgleich nachgeladen werden.
+		"BACKFILL_DAYS": "30",
+		// Höchstzahl FIT-Dateien pro Cron-Lauf (schont Worker-Limits und Garmin).
+		"FIT_PER_RUN": "5"
+	},
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "<KV-ID-eintragen>"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "garmin",
+			"database_id": "<D1-ID-eintragen>",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "FIT_BUCKET",
+			"bucket_name": "garmin-fit"
+		}
+	],
+	"triggers": {
+		"crons": ["*/30 * * * *"]
+	},
+	"observability": {
+		"enabled": true
+	},
+	"dev": {
+		"port": 8788
+	},
+	"secrets": {
+		"required": ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "COOKIE_ENCRYPTION_KEY", "GARMIN_API_KEY"]
+	}
+}

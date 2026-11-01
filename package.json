@@ -1,0 +1,32 @@
+{
+	"name": "garmin-mcp",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types",
+		"type-check": "tsc --noEmit",
+		"test": "vitest run",
+		"db:migrate:local": "wrangler d1 migrations apply garmin --local",
+		"db:migrate:remote": "wrangler d1 migrations apply garmin --remote"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^1.2.4",
+		"@garmin/fitsdk": "^21.218.0",
+		"@modelcontextprotocol/server": "2.3.1",
+		"agents": "^0.29.0",
+		"fflate": "^0.8.3",
+		"hono": "^4.12.27",
+		"octokit": "^5.0.5",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@types/node": "^22.20.5",
+		"typescript": "6.0.3",
+		"vitest": "^3.2.7",
+		"wrangler": "^4.105.0"
+	}
+}
