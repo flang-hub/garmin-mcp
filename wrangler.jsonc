@@ -10,10 +10,13 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
 	"compatibility_flags": ["nodejs_compat"],
+	// Erreichbar unter garmin-mcp.<subdomain>.workers.dev; keine öffentlichen Vorschau-URLs je Version.
+	"workers_dev": true,
+	"preview_urls": false,
 	"vars": {
 		// Die URL, mit der sich MCP-Clients verbinden. Nach dem ersten Deploy auf
 		// https://garmin-mcp.<dein-subdomain>.workers.dev/mcp setzen.
-		"MCP_RESOURCE": "http://localhost:8788/mcp",
+		"MCP_RESOURCE": "https://garmin-mcp.fabiuslang1996.workers.dev/mcp",
 		// GitHub-Konten (kommagetrennt), die sich anmelden dürfen.
 		"ALLOWED_GITHUB_LOGINS": "flang-hub",
 		// GitHub-Konto, dem der Garmin-Schlüssel aus dem Secret GARMIN_API_KEY gehört.
@@ -28,14 +31,14 @@
 	"kv_namespaces": [
 		{
 			"binding": "OAUTH_KV",
-			"id": "<KV-ID-eintragen>"
+			"id": "26bcefc86cd34bd1a0b93077397de4a5"
 		}
 	],
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "garmin",
-			"database_id": "<D1-ID-eintragen>",
+			"database_id": "53f399e8-6e3b-4a93-9109-47758b615490",
 			"migrations_dir": "migrations"
 		}
 	],
